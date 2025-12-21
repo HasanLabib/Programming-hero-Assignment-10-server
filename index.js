@@ -281,6 +281,33 @@ async function run() {
       }
     });
 
+    app.get("/top-reviews", async (req, res) => {
+      try {
+        const reviews = await reviewCollection
+          .find()
+          .sort({ rating: -1 })
+          .limit(6)
+          .toArray();
+
+        res.send(reviews);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to fetch top reviews" });
+      }
+    });
+    app.get("/reviews/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const review = await reviewCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        res.send(review);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to fetch review" });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
