@@ -222,7 +222,6 @@ async function run() {
           reviewId,
           createdAt: new Date(),
         });
-        
 
         res.json({ message: "Added to favorites" });
       } catch (error) {
@@ -244,6 +243,41 @@ async function run() {
       } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Failed to fetch favorites" });
+      }
+    });
+
+    app.get("/favorites/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+
+        const favorites = await favoriteCollection
+          .find({ userEmail: email })
+          .toArray();
+        const favoriteIds = favorites.map((f) => new ObjectId(f.reviewId));
+
+        const reviews = await reviewCollection
+          .find({ _id: { $in: favoriteIds } })
+          .toArray();
+
+        res.send(reviews);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to load favorites" });
+      }
+    });
+
+    app.delete("/favorites/:reviewId", async (req, res) => {
+      try {
+        const { reviewId } = req.params;
+        const { userEmail } = req.query;
+
+        await favoriteCollection.deleteOne({
+          reviewId,
+          userEmail,
+        });
+
+        res.json({ message: "Removed from favorites" });
+      } catch (error) {
+        res.status(500).json({ message: "Failed to remove favorite" });
       }
     });
 
