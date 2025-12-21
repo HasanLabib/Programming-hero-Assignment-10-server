@@ -96,10 +96,21 @@ async function run() {
 
     app.get("/reviews", async (req, res) => {
       try {
-        const reviews = await reviewCollection.find().toArray();
+        const { search } = req.query;
+        const query = {};
+
+        if (search) {
+          query.foodName = { $regex: search, $options: "i" };
+        }
+
+        const reviews = await reviewCollection
+          .find(query)
+          .sort({ createdAt: -1 }) // sort by descending date
+          .toArray();
 
         res.send(reviews);
       } catch (error) {
+        console.error(error);
         res.status(500).json({ message: "Failed to fetch reviews" });
       }
     });
