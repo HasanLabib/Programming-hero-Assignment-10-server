@@ -5,7 +5,8 @@ const cors = require("cors");
 const app = express();
 const port = process.env.PORT || 3000;
 
-// middleware
+const bcrypt = require("bcryptjs");
+const saltRounds = 10;
 app.use(cors());
 app.use(express.json());
 const uri = process.env.MONGO_URI;
@@ -29,6 +30,7 @@ async function run() {
     const foodLoverDb = client.db("foodLoverDb");
     const userCollection = foodLoverDb.collection("users");
     const googleUserCollection = foodLoverDb.collection("googleusers");
+    const reviewCollection = foodLoverDb.collection("reviews");
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
@@ -61,7 +63,7 @@ async function run() {
         guser.createdAt = new Date();
         const email = req.body.email;
         const query = { email: email };
-        const existingUser = await userCollection.findOne(query);
+        const existingUser = await googleUserCollection.findOne(query);
 
         if (existingUser) {
           res.send({
@@ -77,11 +79,20 @@ async function run() {
       }
     });
     app.get("/googleUsers", async (req, res) => {
-        const users = await googleUserCollection.find().toArray();
-        res.send(users);
+      const users = await googleUserCollection.find().toArray();
+      res.send(users);
     });
 
-
+    app.post("/add-review", async (req, res) => {
+      try {
+        const review = req.body;
+        review.createdAt = new Date(review.createdAt);
+        const result = await reviewCollection.insertOne(review);
+        res.status(201).json(result);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to add review" });
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
