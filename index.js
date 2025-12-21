@@ -31,6 +31,8 @@ async function run() {
     const userCollection = foodLoverDb.collection("users");
     const googleUserCollection = foodLoverDb.collection("googleusers");
     const reviewCollection = foodLoverDb.collection("reviews");
+    const favoriteCollection = foodLoverDb.collection("favorites");
+
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
@@ -196,6 +198,55 @@ async function run() {
         res.status(500).json({ message: "Failed to update review" });
       }
     });
+
+    app.post("/reviews/favorite/:reviewId", async (req, res) => {
+      try {
+        const { reviewId } = req.params;
+        const { userEmail } = req.body;
+
+        if (!userEmail)
+          return res.status(400).json({ message: "User email required" });
+
+        const existing = await favoriteCollection.findOne({
+          userEmail,
+          reviewId,
+        });
+
+        if (existing) {
+          await favoriteCollection.deleteOne({ userEmail, reviewId });
+          return res.json({ message: "Removed from favorites" });
+        }
+
+        await favoriteCollection.insertOne({
+          userEmail,
+          reviewId,
+          createdAt: new Date(),
+        });
+        
+
+        res.json({ message: "Added to favorites" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to toggle favorite" });
+      }
+    });
+
+    app.get("/reviews/favorites/:userEmail", async (req, res) => {
+      try {
+        const { userEmail } = req.params;
+        const favoriteReviews = await favoriteCollection
+          .find({ userEmail })
+          .toArray();
+        const favoriteIds = favoriteReviews.map(
+          (favReview) => favReview.reviewId
+        );
+        res.send(favoriteIds);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to fetch favorites" });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
