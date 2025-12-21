@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
 const app = express();
@@ -94,6 +94,38 @@ async function run() {
       }
     });
 
+    app.get("/reviews", async (req, res) => {
+      try {
+        const reviews = await reviewCollection.find().toArray();
+
+        res.send(reviews);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to fetch reviews" });
+      }
+    });
+
+    app.get("/reviews/user/:email", async (req, res) => {
+      const { email } = req.params;
+      try {
+        const reviews = await reviewCollection
+          .find({ userEmail: email })
+          .toArray();
+        res.send(reviews);
+      } catch (error) {
+        console.error(error);
+        res
+          .status(500)
+          .json({ message: "Failed to fetch reviews for this user" });
+      }
+    });
+
+    app.delete("/reviews/:id", async (req, res) => {
+      const { id } = req.params;
+      const result = await reviewCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
