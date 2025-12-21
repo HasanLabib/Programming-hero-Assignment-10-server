@@ -118,13 +118,72 @@ async function run() {
           .json({ message: "Failed to fetch reviews for this user" });
       }
     });
+    app.get("/reviews/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        const review = await reviewCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!review) {
+          return res.status(404).json({ message: "Review not found" });
+        }
+        res.json(review);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to fetch review" });
+      }
+    });
 
     app.delete("/reviews/:id", async (req, res) => {
       const { id } = req.params;
-      const result = await reviewCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.send(result);
+      try {
+        const result = await reviewCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to delete review" });
+      }
+    });
+
+    app.put("/reviews/:id", async (req, res) => {
+      const { id } = req.params;
+      const {
+        foodName,
+        foodImage,
+        restaurant,
+        location,
+        city,
+        rating,
+        reviewText,
+        userEmail,
+        userName,
+        createdAt,
+      } = req.body;
+      try {
+        const result = await reviewCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              foodName,
+              foodImage,
+              restaurant,
+              location,
+              city,
+              rating,
+              reviewText,
+              userEmail,
+              userName,
+              createdAt,
+            },
+          }
+        );
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to update review" });
+      }
     });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
