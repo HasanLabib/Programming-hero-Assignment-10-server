@@ -26,12 +26,13 @@ app.get("/", (req, res) => {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    //await client.connect();
     const foodLoverDb = client.db("foodLoverDb");
     const userCollection = foodLoverDb.collection("users");
     const googleUserCollection = foodLoverDb.collection("googleusers");
     const reviewCollection = foodLoverDb.collection("reviews");
     const favoriteCollection = foodLoverDb.collection("favorites");
+    const contactCollection = foodLoverDb.collection("contacts");
 
     app.post("/users", async (req, res) => {
       try {
@@ -84,6 +85,16 @@ async function run() {
       const users = await googleUserCollection.find().toArray();
       res.send(users);
     });
+    app.get("/users", async (req, res) => {
+      try {
+        const users = await userCollection.find().toArray();
+
+        res.send(users);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to fetch users" });
+      }
+    });
 
     app.post("/add-review", async (req, res) => {
       try {
@@ -98,22 +109,47 @@ async function run() {
 
     app.get("/reviews", async (req, res) => {
       try {
-        const { search } = req.query;
+        const { search, page = 1, limit = 8 } = req.query;
+
         const query = {};
 
         if (search) {
           query.foodName = { $regex: search, $options: "i" };
         }
 
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const totalCount = await reviewCollection.countDocuments(query);
+
         const reviews = await reviewCollection
           .find(query)
-          .sort({ createdAt: -1 }) // sort by descending date
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parseInt(limit))
           .toArray();
 
-        res.send(reviews);
+        res.send({
+          totalCount,
+          reviews,
+        });
       } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Failed to fetch reviews" });
+      }
+    });
+    app.get("/top-reviews", async (req, res) => {
+      try {
+        const reviews = await reviewCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .toArray();
+
+        res.send({
+          reviews: reviews,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch top reviews" });
       }
     });
 
@@ -308,8 +344,349 @@ async function run() {
       }
     });
 
+    app.get("/explore", async (req, res) => {
+      try {
+        const {
+          search = "",
+          category,
+          city,
+          sort = "newest",
+          page = 1,
+          limit = 8,
+        } = req.query;
+
+        const query = {};
+        if (search) {
+          query.$or = [
+            { foodName: { $regex: search, $options: "i" } },
+            { restaurant: { $regex: search, $options: "i" } },
+          ];
+        }
+        if (category && category !== "All") {
+          query.category = { $regex: `^${category}$`, $options: "i" };
+        }
+
+        if (city && city !== "All") {
+          query.city = city;
+        }
+        let sortQuery = { createdAt: -1 }; // newest
+        if (sort === "rating") sortQuery = { rating: -1 };
+
+        const skip = (Number(page) - 1) * Number(limit);
+
+        const reviews = await reviewCollection
+          .find(query)
+          .sort(sortQuery)
+          .skip(skip)
+          .limit(Number(limit))
+          .toArray();
+
+        const total = await reviewCollection.countDocuments(query);
+
+        res.send({
+          reviews,
+          total,
+          currentPage: Number(page),
+          totalPages: Math.ceil(total / limit),
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to load explore data" });
+      }
+    });
+
+    app.get("/dashboard/user-stats/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+
+        const reviewCount = await reviewCollection.countDocuments({
+          userEmail: email,
+        });
+
+        const favoriteCount = await favoriteCollection.countDocuments({
+          userEmail: email,
+        });
+
+        const userReviews = await reviewCollection
+          .find({ userEmail: email })
+          .toArray();
+
+        const ratingDistribution = [
+          { rating: 1, count: 0 },
+          { rating: 2, count: 0 },
+          { rating: 3, count: 0 },
+          { rating: 4, count: 0 },
+          { rating: 5, count: 0 },
+        ];
+
+        userReviews.forEach((review) => {
+          const rating = Math.round(Number(review.rating));
+
+          if (rating >= 1 && rating <= 5) {
+            ratingDistribution[rating - 1].count++;
+          }
+        });
+
+        res.json({
+          totalReviews: reviewCount,
+          totalFavorites: favoriteCount,
+          ratingDistribution,
+        });
+      } catch (error) {
+        console.error("USER STATS ERROR 👉", error);
+        res.status(500).json({
+          message: "Failed to fetch user stats",
+          error: error.message,
+          stack: error.stack,
+        });
+      }
+    });
+
+    app.get("/dashboard/admin-stats", async (req, res) => {
+      try {
+        // 1️⃣ Simple counts
+        const totalUsers = await userCollection.countDocuments();
+        const totalReviews = await reviewCollection.countDocuments();
+        const totalFavorites = await favoriteCollection.countDocuments();
+
+        // 2️⃣ Get last 6 months reviews
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        const reviews = await reviewCollection
+          .find({ createdAt: { $gte: sixMonthsAgo } })
+          .toArray();
+
+        // 3️⃣ Prepare months map
+        const monthNames = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+        const monthMap = {};
+
+        reviews.forEach((review) => {
+          const date = new Date(review.createdAt);
+          const month = monthNames[date.getMonth()];
+
+          if (!monthMap[month]) {
+            monthMap[month] = 0;
+          }
+          monthMap[month]++;
+        });
+
+        // 4️⃣ Convert map → array (for recharts)
+        const monthlyData = Object.keys(monthMap).map((month) => ({
+          month,
+          reviews: monthMap[month],
+        }));
+
+        // 5️⃣ Send response
+        res.json({
+          totalUsers,
+          totalReviews,
+          totalFavorites,
+          monthlyData,
+        });
+      } catch (error) {
+        console.error("ADMIN STATS ERROR:", error);
+        res.status(500).json({ message: "Failed to fetch admin stats" });
+      }
+    });
+
+    app.get("/dashboard/recent-reviews/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+        const { limit = 5 } = req.query;
+
+        const reviews = await reviewCollection
+          .find({ userEmail: email })
+          .sort({ createdAt: -1 })
+          .limit(parseInt(limit))
+          .toArray();
+
+        res.json(reviews);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to fetch recent reviews" });
+      }
+    });
+
+    app.get("/dashboard/top-restaurants/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+
+        const topRestaurants = await reviewCollection
+          .aggregate([
+            { $match: { userEmail: email } },
+            {
+              $group: {
+                _id: "$restaurant",
+                count: { $sum: 1 },
+                avgRating: { $avg: "$rating" },
+              },
+            },
+            { $sort: { count: -1 } },
+            { $limit: 5 },
+          ])
+          .toArray();
+
+        const formattedData = topRestaurants.map((item) => ({
+          name: item._id,
+          reviews: item.count,
+          avgRating: parseFloat(item.avgRating.toFixed(1)),
+        }));
+
+        res.json(formattedData);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to fetch top restaurants" });
+      }
+
+      app.get("/reviews/:id", async (req, res) => {
+        try {
+          const { id } = req.params;
+
+          const review = await reviewsCollection.findOne({
+            _id: new ObjectId(id),
+          });
+
+          if (!review) {
+            return res.status(404).send({ message: "Review not found" });
+          }
+
+          res.send(review);
+        } catch (error) {
+          res.status(500).send({ message: "Invalid ID" });
+        }
+      });
+    });
+
+    app.get("/dashboard/admin-rating-distribution", async (req, res) => {
+      try {
+        const reviews = await reviewCollection.find().toArray();
+
+        const ratingDistribution = [
+          { rating: 1, count: 0 },
+          { rating: 2, count: 0 },
+          { rating: 3, count: 0 },
+          { rating: 4, count: 0 },
+          { rating: 5, count: 0 },
+        ];
+
+        reviews.forEach((review) => {
+          const rating = Math.round(Number(review.rating));
+          if (rating >= 1 && rating <= 5) {
+            ratingDistribution[rating - 1].count++;
+          }
+        });
+
+        res.json(ratingDistribution);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to load rating distribution" });
+      }
+    });
+
+    app.get("/dashboard/admin-reviews-over-time", async (req, res) => {
+      try {
+        const reviews = await reviewCollection.find().toArray();
+
+        const monthNames = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+        const monthMap = {};
+
+        reviews.forEach((review) => {
+          const date = new Date(review.createdAt);
+          const month = monthNames[date.getMonth()];
+          monthMap[month] = (monthMap[month] || 0) + 1;
+        });
+
+        const monthlyData = Object.keys(monthMap).map((month) => ({
+          month,
+          reviews: monthMap[month],
+        }));
+
+        res.json(monthlyData);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to load review trends" });
+      }
+    });
+
+    app.get("/dashboard/admin-recent-reviews", async (req, res) => {
+      try {
+        const reviews = await reviewCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .toArray();
+
+        res.json(reviews);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to fetch recent reviews" });
+      }
+    });
+
+    app.post("/contact", async (req, res) => {
+      try {
+        const { name, email, subject, message } = req.body;
+
+        if (!name || !email || !message) {
+          return res.status(400).json({ message: "All fields are required" });
+        }
+
+        const contactData = {
+          name,
+          email,
+          subject,
+          message,
+          createdAt: new Date(),
+        };
+
+        await contactCollection.insertOne(contactData);
+
+        res.status(201).json({ message: "Message saved successfully" });
+      } catch (error) {
+        console.error("CONTACT ERROR:", error);
+        res.status(500).json({ message: "Failed to send message" });
+      }
+    });
+
+    app.get("/dashboard/contact-messages", async (req, res) => {
+      try {
+        const messages = await contactCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.send(messages);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to fetch messages" });
+      }
+    });
+
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    //await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
